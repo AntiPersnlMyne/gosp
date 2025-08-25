@@ -11,7 +11,8 @@ import numpy as np
 cimport numpy as np
 from cython.parallel import prange
 
-from ..build.rastio import MultibandBlockReader
+from ..build.math_utils import compute_orthogonal_complement_matrix, compute_opci
+
 
 
 # --------------------------------------------------------------------------------------------
@@ -69,54 +70,54 @@ cdef void _extract_window(
 
 
 cdef void _best_target(
-    np.float32_t[:,:] pixel_window,
-    np.float32_t[:,:] orthog_complement,
-    np.float32_t[:]   best_target,
-    np.float32_t[:,:] projected
+    np.float32_t[:,:] pixel_window,     # (num_pixels, bands)
+    np.float32_t[:,:] orthog_complement,# (bands, proj_dim) -- here proj_dim may be bands if P_perp is full
+    np.float32_t[:]   best_target,      # (bands,)
+    float *           best_norm_ptr     # pointer to a single float to store best norm
 ) noexcept nogil:
     """
-    For every pixel in pixel_window compute its projection onto the
+    For every pixel in *pixel_window* compute its projection onto the
     orthogonal complement defined by *orthog_complement* and keep the
     pixel with the largest projection norm.
 
-    Parameters
-    ----------
-    pixel_window : ndarray[float32, ndim=2]
-        Pixels flattened into rows; shape (num_pixels, bands)
-    orthog_complement : ndarray[float32, ndim=2]
-        Projection matrix (bands, bands-orthog_dim)
-    best_target : ndarray[float32, ndim=1]
-        Buffer that receives the pixel with the largest norm
+    IMPORTANT: this computes projection norms on-the-fly and does not
+    allocate a big `projected` buffer.
     """
     cdef:
-        Py_ssize_t band, j
-        Py_ssize_t pixel
-        Py_ssize_t proj_dim = orthog_complement.shape[1]
+        Py_ssize_t pixel, band, j, k
         Py_ssize_t num_pixels = pixel_window.shape[0]
         Py_ssize_t bands = pixel_window.shape[1]
+        Py_ssize_t proj_dim = orthog_complement.shape[1]
 
-    # Project every pixel
-    for pixel in range(num_pixels):
-        for j in range(proj_dim):
-            projected[pixel, j] = 0.0
-            for band in range(bands):
-                projected[pixel, j] += pixel_window[pixel, band] * orthog_complement[band, j]
+        np.float32_t tmp
+        np.float32_t acc_j
+        np.float32_t best_local_norm = -1e36
+        int best_idx = -1
+        np.float32_t norm
 
-    # Find the pixel with the largest projection norm
-    cdef float max_norm = -1e36
-    cdef float norm
-    cdef int best_idx = -1
+    # For each pixel compute norm = sum_j ( sum_b pixel[b]*orthog[b,j] )^2
     for pixel in range(num_pixels):
         norm = 0.0
-        for band in range(bands):
-            norm += projected[pixel, band] * projected[pixel, band]
-        if norm > max_norm:
-            max_norm = norm
+        for j in range(proj_dim):
+            acc_j = 0.0
+            for band in range(bands):
+                acc_j += pixel_window[pixel, band] * orthog_complement[band, j]
+            norm += acc_j * acc_j
+
+        if norm > best_local_norm:
+            best_local_norm = norm
             best_idx = pixel
 
-    # Copy the best pixel back into best_target
-    for band in range(bands):
-        best_target[band] = pixel_window[best_idx, band]
+    # Copy best pixel into best_target and write its norm
+    if best_idx >= 0:
+        for band in range(bands):
+            best_target[band] = pixel_window[best_idx, band]
+        best_norm_ptr[0] = best_local_norm
+    else:
+        # No pixels will write zeros
+        for band in range(bands):
+            best_target[band] = 0.0
+        best_norm_ptr[0] = 0.0
 
 
 
@@ -125,105 +126,167 @@ cdef void _best_target(
 # --------------------------------------------------------------------------------------------
 def target_generation_process(
     np.float32_t[:,:,::1] vrt,
-    int window_height,
-    int window_width,
-    np.float32_t[:,:] orthog_complement,
+    tuple window_shape,
+    int max_targets,
+    float opci_threshold,
     bint verbose
 ) -> np.ndarray[np.float32_t]:
     """
-    Build the target matrix by scanning the synthetic image in a grid of
-    overlapping windows.  The function is fully typed, releases the GIL
-    where possible, and uses OpenMP to split the work across cores.
+    Iterative TGP that implements the Ren & Chang OSP loop.
 
     Parameters
     ----------
-    synthetic_vrt : ndarray[float32, ndim=3]
+    vrt : ndarray[float32, ndim=3]
         Synthetic image with shape (bands, height, width)
-    window_height, window_width : int
-        Size of the scanning window in pixels
-    orthog_complement : ndarray[float32, ndim=2]
-        Projection matrix that defines the orthogonal complement
-        (bands, bands-orthog_dim)
+    window_shape : tuple (h, w)
+        Size of scanning window in pixels
+    max_targets : int
+        Maximum number of targets to find
+    opci_threshold : float
+        Stop if selected candidate OPCI < opci_threshold
+    verbose : bool
+        Enable progress messages
 
     Returns
     -------
     ndarray[float32, ndim=2]
-        Target matrix with shape (num_windows, bands)
-   """
+        Targets stacked as (K, bands)
+    """
     cdef:
         Py_ssize_t height = vrt.shape[1]
         Py_ssize_t width = vrt.shape[2]
         Py_ssize_t bands = vrt.shape[0]
-
+        int window_height = <int> window_shape[0]
+        int window_width  = <int> window_shape[1]
 
         Py_ssize_t rows_per_window = (height + window_height - 1) // window_height
-        Py_ssize_t cols_per_window = (width + window_width - 1) // window_width
-        Py_ssize_t total_windows = rows_per_window * cols_per_window
+        Py_ssize_t cols_per_window = (width  + window_width  - 1) // window_width
+        Py_ssize_t total_windows   = rows_per_window * cols_per_window
+        Py_ssize_t num_pixels_local
 
+        # precompute max pixels per window
+        Py_ssize_t max_pixels = window_height * window_width
 
-        # Allocate the output buffer once – we will fill it in place.
-        np.ndarray[np.float32_t, ndim=2] target_matrix = np.empty(
-        (total_windows, bands), dtype=np.float32
-        )
+        np.float32_t[:, ::1] best_pixels_mv
+        np.float32_t[::1]   best_norms_mv
+        cdef int[:, ::1] windows_mv
 
-
-        # A buffer that holds a single window (flattened) -- allocated in Python space
-        np.ndarray[np.float32_t, ndim=2] flattened_window = np.empty(
-        (window_height * window_width, bands), dtype=np.float32
-        )
-
-
-        # Projected buffer: max pixels equals flattened_window rows, proj_dim from orthog_complement
-        np.ndarray[np.float32_t, ndim=2] projected = np.empty(
-        (window_height * window_width, orthog_complement.shape[1]), dtype=np.float32
-        )
-
-
-        # Array to contain the best pixel of the current window
-        np.ndarray[np.float32_t, ndim=1] best_pixel = np.empty(bands, dtype=np.float32)
-
-
-    # Create memoryviews 
-    cdef np.float32_t[:, :, ::1] vrt_mv = vrt
-    cdef np.float32_t[:, ::1] target_mv = target_matrix
+    # Preallocate flattened window (max size) -- done once in Python space
+    cdef np.ndarray[np.float32_t, ndim=2] flattened_window = np.empty((max_pixels, bands), dtype=np.float32)
     cdef np.float32_t[:, ::1] flat_mv = flattened_window
-    cdef np.float32_t[:, ::1] proj_mv = projected
-    cdef np.float32_t[::1] best_mv = best_pixel
 
-
+    # Precreate a buffer for an individual best pixel; we'll store per-window results into arrays
+    # We'll allocate per-iteration arrays for best per-window results (since proj-dim changes)
     cdef:
         Py_ssize_t row_offset, col_offset, window_index
         int row_start, row_end, col_start, col_end
-        Py_ssize_t band
+        Py_ssize_t i_win
+        np.float32_t[:, ::1] P_mv
 
-    # Create progress bar
-    print("[TGP] Beginning TGP ...")
-    # Parallel loop through windows
-    for window_index in prange(total_windows, nogil=True, schedule='dynamic'):
-        # Compute offsets
-        row_offset = (window_index // cols_per_window) * window_height
-        col_offset = (window_index % cols_per_window) * window_width
+    # Build windows index array in Python (no nogil) so we can iterate or parallelize easily
+    # windows_arr shape (total_windows, 4) with (row_off, col_off, height, width)
+    cdef np.ndarray[np.int32_t, ndim=2] windows_arr = np.empty((total_windows, 4), dtype=np.int32)
+    cdef int wrow, wcol, widx = 0
+    for wrow in range(rows_per_window):
+        row_offset = wrow * window_height
+        row_end_tmp = row_offset + window_height
+        for wcol in range(cols_per_window):
+            col_offset = wcol * window_width
+            col_end_tmp = col_offset + window_width
+            # compute actual sizes (clamp at edges)
+            rlen = window_height if row_offset + window_height <= height else height - row_offset
+            clen = window_width  if col_offset + window_width  <= width  else width  - col_offset
+            windows_arr[widx, 0] = <np.int32_t> row_offset
+            windows_arr[widx, 1] = <np.int32_t> col_offset
+            windows_arr[widx, 2] = <np.int32_t> rlen
+            windows_arr[widx, 3] = <np.int32_t> clen
+            widx += 1
 
-        # Window indices
-        row_start = <int> row_offset
-        col_start = <int> col_offset
-        # Bounds check
-        row_end = row_offset + window_height 
-        if row_end > height: <int> height
-        col_end = col_offset + window_width 
-        if col_end > width:  <int> width
+    # List to hold discovered target vectors (Python space)
+    targets = []
 
-        # Extract window into the pre-allocated flat buffer 'flat_mv'
-        _extract_window(row_start, row_end, col_start, col_end, vrt_mv, flat_mv)
+    # Main iterative loop: discover up to max_targets
+    if verbose:
+        from tqdm import tqdm
+        outer_prog = tqdm(range(max_targets), desc="[TGP] Iterations", colour="MAGENTA")
+    else:
+        outer_prog = range(max_targets)
 
-        # Compute best target using the projected buffer
-        _best_target(flat_mv, orthog_complement, best_mv, proj_mv)
+    for k_target in outer_prog:
+        # Compute orthogonal complement (GIL must be held)
+        if k_target == 0:
+            # Identity projector -> represented as full (bands x bands) identity matrix
+            P_perp = np.eye(bands, dtype=np.float32)
+        else:
+            # compute orthogonal complement projector using Python routine
+            # compute_orthogonal_complement_matrix expects list of 1D numpy arrays
+            P_perp = compute_orthogonal_complement_matrix(targets).astype(np.float32, copy=False)
 
+        # Prepare memoryviews for P_perp
+        P_mv = P_perp
 
-        # Copy best pixel into the final target matrix (use memoryview indexing)
-        for band in range(bands):
-            target_mv[window_index, band] = best_mv[band]
-    
-    
-    return target_matrix
+        # Arrays to hold per-window best pixel and norm
+        best_pixels = np.empty((total_windows, bands), dtype=np.float32)
+        best_norms  = np.empty((total_windows,), dtype=np.float32)
+
+        best_pixels_mv = best_pixels
+        best_norms_mv  = best_norms
+
+        # NOTE: this is a heavy, pure C-level kernel, with GIL
+        for _ in prange(total_windows, nogil=True, schedule='dynamic'):
+            # placeholder required by Cython for flow -- actual loop below done in a pythonic wrapper
+            pass  
+
+        # Memoryview of windows
+        windows_mv = windows_arr  # shape (total_windows, 4)
+
+        # Iterate through windows and gen targets
+        num_pixels_local
+        for i_win in prange(total_windows, nogil=True, schedule='dynamic'):
+            # read the window parameters (pure C-level reads)
+            row_offset = windows_mv[i_win, 0]
+            col_offset = windows_mv[i_win, 1]
+            row_start = row_offset
+            col_start = col_offset
+            row_end = row_offset + windows_mv[i_win, 2]
+            col_end = col_offset + windows_mv[i_win, 3]
+
+            # Extract window into flat_mv (writes first num_pixels entries)
+            _extract_window(row_start, row_end, col_start, col_end, vrt, flat_mv)
+
+            # Number of pixels in this window
+            num_pixels_local = (row_end - row_start) * (col_end - col_start)
+
+            # Create a sliced view for the active pixels (this is allowed when passing inline)
+            # Call _best_target on the slice; pass address of best_norms_mv[i_win] as pointer
+            _best_target(flat_mv[:num_pixels_local, :], P_mv, best_pixels_mv[i_win], &best_norms_mv[i_win])
+
+        # After nogil section: select best window candidate (GIL regained)
+        # Find index of max norm
+        best_idx = int(np.argmax(best_norms))
+        best_candidate = best_pixels[best_idx]   # numpy 1D array (bands,)
+
+        # Compute OPCI for the candidate; compute_opci expects P_perp and candidate vector
+        opci_val = compute_opci(P_perp, best_candidate)
+
+        if verbose: print(f"[TGP] Iter {k_target+1}: OPCI={opci_val:.6f}")
+
+        # Stopping condition
+        if opci_val < opci_threshold:
+            if verbose:
+                print(f"[TGP] Stopping: OPCI {opci_val:.6f} < threshold {opci_threshold}")
+            break
+
+        # Accept target: append to list
+        targets.append(best_candidate.copy())
+
+    # End iterations
+
+    # Prepare return array: stack targets into (K, bands)
+    if len(targets) == 0:
+        # Return empty array with shape (0, bands)
+        return np.empty((0, bands), dtype=np.float32)
+    else:
+        targets_arr = np.stack(targets, axis=0).astype(np.float32, copy=False)
+        return targets_arr
 

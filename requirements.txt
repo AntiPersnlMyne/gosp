@@ -10,10 +10,8 @@ numpy
 # Optimization
 cython             # C extensions for Python 
 setuptools         # Build Cython
-numba              # JIT compiler and prange
-# dask[complete]   # Parallel processing
-cupy-cuda12x     # NumPy GPU-acceleration
-# dask-cuda        # Dask GPU-acceleration
+# numba              # JIT compiler and prange
+# cupy-cuda12x       # NumPy GPU-acceleration
 
 # Raster data
 rasterio           # Raster dataset I/O
@@ -21,4 +19,4 @@ gdal               # Virtual Raster Title (VRT)
 
 # Graphical User Interface 
 tqdm               # Progress bar
-numba-Progress     # Nogil tqdm wrapper
+# numba-Progress     # Nogil tqdm wrapper

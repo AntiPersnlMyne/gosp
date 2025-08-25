@@ -113,7 +113,7 @@ def compute_orthogonal_complement_matrix(
 
 
     Returns:
-    np.ndarray: (bands, bands) float32 symmetric projector.
+        np.ndarray: (bands, bands) float32 symmetric projector.
     """
     if len(target_vectors) == 0:
         raise ValueError("Must provide at least one target vector")

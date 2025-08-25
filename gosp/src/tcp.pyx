@@ -12,10 +12,10 @@ import numpy as np
 cimport numpy as np
 from cython.parallel import prange
 
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 from libc.math cimport fmaf
 from logging import info
-import tqdm as tqdm
+from tqdm import tqdm
 
 from gosp.build.rastio import (
     MultibandBlockReader, 
@@ -121,13 +121,12 @@ cdef int[:,:] _generate_windows(
 
 
 def target_classification_process(
-    *, # requirement of keyword args
     generated_bands: Sequence[str],
     window_shape: Tuple[int, int],
-    targets: List[np.ndarray],
+    targets: np.ndarray,  # (K, B) float32
     output_dir: str,
     scores_filename: str = "targets_classified.tif",
-    verbose:bool = True,
+    verbose: bool = True,
 ) -> None:
     """
     Compute per-target OSP scores across the image without parallel processing.
@@ -135,7 +134,7 @@ def target_classification_process(
     Args:
         generated_bands (Sequence[str]): Paths to the generated bands.
         window_shape (Tuple[int,int]): Tile (block) size.
-        targets (List[np.ndarray]): List of target spectra (from TGP).
+        targets (np.ndarray): Array of discovered target spectra with shape (K, B).
         output_dir (str): Directory to write output TIFF.
         scores_filename (str): Output filename.
         verbose (bool): Enable progress/info messages.
@@ -153,48 +152,48 @@ def target_classification_process(
         int i, total_windows, k, k_target
         Py_ssize_t k_targets
         # memoryviews used inside nogil
-        float32_t[:, :] out_mv
-        float32_t[:] targ_mv
-        float32_t[:, :, :] proj_mv
-
-    if len(targets) == 0:
-        raise ValueError("[TCP] No targets provided (TGP output is empty).")
+        float32_t[:, :] targets_mv
 
     # ==============================
     # Image size & window dimensions
     # ==============================
     if verbose: info("[TCP] Reading image dimensions ...")
     with MultibandBlockReader(generated_bands) as reader:
-        img_height, img_width = reader.image_shape
-        img_bands = reader.total_bands
+        img_height, img_width = reader.get_image_shape()
+        img_bands = reader.get_total_bands()
 
 
     # ==============================================
     # Prepare targets and projection matrices
     # ==============================================
     if verbose: info("[TCP] Preparing targets ...")
-    k_targets = len(targets)
-    targets_arr = np.stack([np.asarray(t, dtype=np.float32) for t in targets], axis=0)
-    if not targets_arr.flags['C_CONTIGUOUS']:
-        targets_arr = np.ascontiguousarray(targets_arr, dtype=np.float32)
+    if targets.ndim != 2:
+        raise ValueError("targets must be 2D array of shape (K, B)")
+
+    if targets.dtype != np.float32 or not targets.flags["C_CONTIGUOUS"]:
+        targets = np.ascontiguousarray(targets, dtype=np.float32)
+
+    k_targets = targets.shape[0]
+    targets_mv = targets
 
 
     # ==============================================
     # Build Pk matrices (K, B, B)
     # ==============================================
     Pk_list = []
-    # Iterate through 'k' targets
     for k in range(k_targets):
         if k_targets > 1:
-            other_targets = [targets[j] for j in range(k_targets) if j != k]
-            Pk_list.append(compute_orthogonal_complement_matrix(other_targets).astype(np.float32))
+            # all targets except k-th
+            other_targets = [targets[j, :] for j in range(k_targets) if j != k]
+            Pk_list.append(
+                compute_orthogonal_complement_matrix(other_targets).astype(np.float32)
+            )
         else:
             Pk_list.append(np.eye(img_bands, dtype=np.float32))
     Pk_arr = np.stack(Pk_list, axis=0)
-    # Check C Contiguous
     if not Pk_arr.flags['C_CONTIGUOUS']:
         Pk_arr = np.ascontiguousarray(Pk_arr, dtype=np.float32)
-        
+
 
     # ==============================================
     # Generate windows
@@ -207,11 +206,9 @@ def target_classification_process(
     # ==============================================
     # Initialize writer
     # ==============================================
-    # Create memoryviews
-    cdef float32_t[:,:,:,:] proj_blocks_mv # (K, B, h, w)
-    cdef float32_t[:,:,:] scores_mv  # (K, h, w)
-    cdef float32_t[:,:] targets_mv = targets_arr  # (K, B)
-    # Open dataset reader/writer
+    cdef float32_t[:,:,:,:] proj_blocks_mv  # (K, B, h, w)
+    cdef float32_t[:,:,:] scores_mv         # (K, h, w)
+
     with MultibandBlockWriter(
         output_dir=output_dir,
         output_image_shape=(img_height, img_width),
@@ -221,64 +218,47 @@ def target_classification_process(
         output_datatype=np.float32,
     ) as writer:
         with MultibandBlockReader(generated_bands) as reader:
-            # Loop over windows sequentially
             for i in tqdm(range(total_windows), desc="[TCP] Classifying pixels", unit="win", colour="YELLOW"):
                 row_off = win_mv[i, 0]
                 col_off = win_mv[i, 1]
                 win_h   = win_mv[i, 2]
                 win_w   = win_mv[i, 3]
 
-
                 # Read block
                 win = np.asarray([row_off, col_off, win_h, win_w], dtype=np.intc)
                 block = reader.read_multiband_block(win)
-                # Check C contigouous
                 if not block.flags['C_CONTIGUOUS']:
                     block = np.ascontiguousarray(block, dtype=np.float32)
-
 
                 # Pre-allocate proj_blocks: (K, bands, h, w)
                 proj_blocks = np.empty((k_targets, img_bands, win_h, win_w), dtype=np.float32)
 
-                # Compute projected blocks for each target
                 if k_targets == 1:
-                    # If only one target, projection is identity -> copy block
                     proj_blocks[0] = block
                 else:
                     for k in range(k_targets):
-                        # project_block_onto_subspace expects (bands,h,w) and a P matrix (B,B)
                         tmp_proj = project_block_onto_subspace(block, Pk_arr[k])
                         if tmp_proj.dtype != np.float32:
                             tmp_proj = tmp_proj.astype(np.float32, copy=False)
                         if not tmp_proj.flags['C_CONTIGUOUS']:
                             tmp_proj = np.ascontiguousarray(tmp_proj, dtype=np.float32)
-                        # Add block to block list
                         proj_blocks[k] = tmp_proj
-
 
                 # prepare output score array (K, h, w)
                 scores = np.empty((k_targets, win_h, win_w), dtype=np.float32)
 
-
-                # Create memoryviews (must be done before nogil)
+                # Memoryviews
                 proj_blocks_mv = proj_blocks
                 scores_mv = scores
-                targets_mv = targets_mv
 
-
-                # Parallel over targets; each target computes its own (h,w) plane
+                # Parallel per-target
                 for k_target in prange(k_targets, nogil=True, schedule='dynamic'):
-                    # proj_mv: (bands, h, w) view for this target
                     _compute_scores_inner(
                         proj_blocks_mv[k_target, :, :, :],   # (B,h,w)
-                        targets_mv[k_target, :],       # (B,)
+                        targets_mv[k_target, :],             # (B,)
                         scores_mv[k_target, :, :]            # (h,w)
                     )
 
-
-
-                # Write scores onto output band for this window
                 writer.write_block(window=win, block=scores)
-
 
     return None

@@ -194,7 +194,7 @@ def band_generation_process(
     # Pass 1: stats collection
     if verbose: info("[BGP] Pass 1: scanning for min/max ...")
     with MultibandBlockReader(input_image_paths) as reader:
-        prog = tqdm(total=reader.num_windows(window_shape), desc="[BGP] Pass 1 stats", disable=not verbose)
+        prog = tqdm(total=reader.num_windows(window_shape), desc="[BGP] Pass 1 stats", disable=not verbose, colour="BLUE")
         for win in reader.generate_windows(window_shape):
             block = np.ascontiguousarray(reader.read_multiband_block(win), dtype=np.float32)
             out = np.empty((num_bands_out, block.shape[1], block.shape[2]), dtype=np.float32)
@@ -212,7 +212,7 @@ def band_generation_process(
             output_dir, (img_h, img_w), "gen_band_norm.tif", 
             window_shape, np.float32, num_bands_out) \
         as writer:
-            prog = tqdm(total=reader.num_windows(window_shape), desc="[BGP] Pass 2 write", disable=not verbose)
+            prog = tqdm(total=reader.num_windows(window_shape), desc="[BGP] Pass 2 write", disable=not verbose, colour="CYAN")
             for win in reader.generate_windows(window_shape):
                 block = np.ascontiguousarray(reader.read_multiband_block(win), dtype=np.float32)
                 out = np.empty((num_bands_out, block.shape[1], block.shape[2]), dtype=np.float32)
