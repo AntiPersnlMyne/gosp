@@ -81,7 +81,6 @@ def gosp(
     input_image_types:str|tuple[str, ...] = "tif",
     window_shape:tuple = (512,512),
     full_synthetic:bool = False,
-    skip_bgp:bool = False,
     max_targets:int = 10,
     opci_threshold:float = 0.01,
     verbose:bool = False,
@@ -141,9 +140,11 @@ def gosp(
         )
         logging.info(f"[GOSP] Complete. Results written to: {targets_classified_dir}")
     
+    
     # Catch and display any errors
     except Exception as e:
         raise Exception(f"[GOSP] -- Error while running GOSP --:\n{e}")    
+    
     
     # Cleanup temporary file always
     finally:

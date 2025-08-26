@@ -50,8 +50,7 @@ def main():
         output_dir="data/output",
         input_image_types="tif",
         # BGP and TCP parameters
-        full_synthetic=True,                   
-        skip_bgp=False,                 
+        full_synthetic=True,            
         max_targets=3,                
         opci_threshold=0.01,              
         # Throughput
