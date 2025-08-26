@@ -20,6 +20,9 @@ pip install -e . && rm -r build && rm -r gosp/gosp.egg-info
 
 // (Setup, Windows) Build & Compile Cython files
 pip install -e . && del build && del gosp/gosp.egg-info
+
+// (Run) Set # of available threads for multithreading. Depends on your CPU model.
+OMP_NUM_THREADS=12 python main.py
 """
 
 
@@ -47,8 +50,8 @@ def main():
         input_image_types="tif",
         # BGP and TCP parameters
         full_synthetic=True,            
-        max_targets=10,                
-        opci_threshold=0.01,              
+        max_targets=50,                
+        opci_threshold=0.001,              
         # Throughput
         window_shape=(1024,1024),                 
         # Debug
