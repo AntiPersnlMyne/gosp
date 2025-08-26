@@ -42,8 +42,8 @@ def main():
     start = time()
     gosp(
         # Input information
-        input_dir="<Directory to input files>",   
-        output_dir="<Directory to output files",
+        input_dir="data/input/arch177_rgb_365cor_lum",   
+        output_dir="/media/g-m/ExtremeSan",
         input_image_types="tif",
         # BGP and TCP parameters
         full_synthetic=True,            

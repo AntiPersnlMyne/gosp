@@ -28,7 +28,6 @@ import numpy as np
 from ..build.bgp import band_generation_process
 from ..build.tgp import target_generation_process
 from ..build.tcp import target_classification_process
-from ..build.skip_bgp import write_original_multiband
 
 
 # --------------------------------------------------------------------------------------------
@@ -38,7 +37,7 @@ __author__ = "Gian-Mateo (GM) Tifone"
 __copyright__ = "2025, RIT MISHA"
 __credits__ = ["Gian-Mateo Tifone"]
 __license__ = "MIT"
-__version__ = "3.3.0"
+__version__ = "4.0.0"
 __maintainer__ = "MISHA Team"
 __email__ = "mt9485@rit.edu"
 __status__ = "Development" # "Prototype", "Development", "Production"
