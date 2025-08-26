@@ -45,17 +45,17 @@ def main():
     start = time()
     gosp(
         # Input information
-        input_dir="data/input/arch177_rgb_365cor_lum",   
-        output_dir="/media/g-m/ExtremeSan",
+        input_dir="data/input/arch177_365cor",
+        output_dir="D:/",
         input_image_types="tif",
         # BGP and TCP parameters
-        full_synthetic=True,            
-        max_targets=50,                
-        opci_threshold=0.001,              
+        full_synthetic=True,
+        max_targets=10,
+        opci_threshold=0.1,
         # Throughput
-        window_shape=(1024,1024),                 
+        window_shape=(1024,1024),       
         # Debug
-        verbose=True,                      
+        verbose=True,           
     )
     print(f"\n[main/<data_description>] - Execution finished -\nRuntime = {(time() - start):.2f}")
     
