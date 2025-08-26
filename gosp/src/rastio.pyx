@@ -23,10 +23,10 @@ __author__ = "Gian-Mateo (GM) Tifone"
 __copyright__ = "2025, RIT MISHA"
 __credits__ = ["Gian-Mateo Tifone"]
 __license__ = "MIT"
-__version__ = "3.1.7"
+__version__ = "4.0.0"
 __maintainer__ = "MISHA Team"
 __email__ = "mt9485@rit.edu"
-__status__ = "Development" # "Prototype", "Development", "Production"
+__status__ = "Production" # "Prototype", "Development", "Production"
 
 
 # --------------------------------------------------------------------------------------------
@@ -342,7 +342,7 @@ cdef class MultibandBlockWriter:
 
         # Check dims and dataset
         if block_mv.shape[0] != self.num_bands or block_mv.shape[1] != win_h or block_mv.shape[2] != win_w:
-            raise ValueError(f"[rastio] Shape mismatch: got {block.shape}, expected ({self.num_bands}, {win_h}, {win_w})")
+            raise ValueError(f"[rastio] Shape mismatch: got {(block_mv.shape[0], block_mv.shape[1], block_mv.shape[2])}, expected ({self.num_bands}, {win_h}, {win_w})")
 
         if not self.dataset:
             raise RuntimeError("[rastio] Attempted to write but dataset is not initialized")

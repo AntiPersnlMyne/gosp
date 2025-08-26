@@ -23,7 +23,6 @@ pyx_files = [
     "tgp.pyx",
     "tcp.pyx",
     "rastio.pyx",
-    "skip_bgp.pyx",
     "math_utils.pyx",
 ]
 
@@ -52,7 +51,7 @@ extensions = [
 # ===============================
 setup(
     name="gosp",
-    version="3.1",
+    version="3.2",
     packages=find_packages(where="gosp"),
     package_dir={"": "gosp"},  # tells setuptools the top-level package is under gosp/
     ext_modules=cythonize(extensions, compiler_directives=cython_directives),

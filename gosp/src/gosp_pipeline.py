@@ -85,6 +85,46 @@ def gosp(
     opci_threshold:float = 0.01,
     verbose:bool = False,
 ) -> None:
+    """
+    Generalized Orthogonal Subspace Projection. 
+    Generates synthetic, non-linear bands from input data (BGP). 
+    Uses synthetic data to find targets (TGP),
+    and label all pixels, one target per output band (TCP).
+    
+
+    Args:
+        input_dir (str): 
+            Folder of input files. 
+            Can be mixed - multiband and singleband. 
+            Can have mixed filetypes. 
+            Cannot have different height,width (rows,cols).
+        output_dir (str): 
+            Folder to place output files. 
+            Temporary file will also be stored here.
+        input_image_types (str | tuple[str, ...], optional):
+            Extensions -- without the '.' -- of input image types. Defaults to "tif".
+        window_shape (tuple, optional): 
+            To avoid loading all data onto RAM (likely more GB than RAM on your PC), 
+            set a window size to grab a chunk of the input data. Size = (rows, cols). 
+            Defaults to (512,512).
+        full_synthetic (bool, optional):
+            Whether to use sqrt and log1p combinations of input bands for synthetic data. 
+            Defaults to False.
+        max_targets (int, optional): 
+            Number of targets (output bands) for algorithm to find. May not acehive this number if
+            `opci_threshold` is set too high. Defaults to 10.
+        opci_threshold (float, optional): 
+            Purity index. The algorithm creates purer classes, the more targets generated. 
+            Setting opci low (e.g., 0.001) creates more pure targets. 
+            Setting opci high (e.g., 0.1) creates less pure targets. 
+            Defaults to 0.01.
+        verbose (bool, optional): 
+            Displays debug messages and progress bars. Defaults to False.
+
+    Raises:
+        FileNotFoundError: Cannot find input files from `input_dir` with specified file type.
+        Exception: Catches all runtime errors. Deletes temporary files if program crashes.
+    """
     # IO variables
     input_files = _discover_image_files(input_dir, input_image_types)
     targets_classified_dir = f"{output_dir}/targets_classified"

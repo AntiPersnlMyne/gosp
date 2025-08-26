@@ -6,20 +6,20 @@ __author__ = "Gian-Mateo (GM) Tifone"
 __copyright__ = "2025, RIT MISHA"
 __credits__ = ["Gian-Mateo Tifone", "Douglas Tavolette", "Roger Easton Jr.", "David Messinger", "Julie Decker"]
 __license__ = "MIT"
-__version__ = "3.1.1"
+__version__ = "4.0.0"
 __maintainer__ = "MISHA Team"
 __email__ = "mt9485@rit.edu"
-__status__ = "Development" # "Development", or "Production". 
+__status__ = "Production" # "Development", or "Production". 
 
 # ---------------
 # Useful commands
 # ---------------
 """
-// (Development) Compile Cython files 
-python setup.py build_ext --inplace
+// (Setup, Linux) Build & Compile Cython files
+pip install -e . && rm -r build && rm -r gosp/gosp.egg-info 
 
-// (Install) Build & Compile Cython files
-pip install -e . && rm -r build || del build && rm -r gosp/gosp.egg-info || del gosp/gosp.egg-info
+// (Setup, Windows) Build & Compile Cython files
+pip install -e . && del build && del gosp/gosp.egg-info
 """
 
 
@@ -28,37 +28,33 @@ pip install -e . && rm -r build || del build && rm -r gosp/gosp.egg-info || del 
 # --------------------------------------------------------------------------------------------
 from gosp import gosp
 
-import pstats, cProfile
-
 from time import time
 from warnings import filterwarnings
-
-
-# GeoTIFF warning suppression
-filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform, gcps, or rpcs.*")
-
 
 
 # --------------------------------------------------------------------------------------------
 # Driver Code
 # --------------------------------------------------------------------------------------------
+# GeoTIFF warning suppression
+filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform, gcps, or rpcs.*")
+
 def main():
     start = time()
     gosp(
         # Input information
-        input_dir="data/input/test",   
-        output_dir="data/output",
+        input_dir="<Directory to input files>",   
+        output_dir="<Directory to output files",
         input_image_types="tif",
         # BGP and TCP parameters
         full_synthetic=True,            
-        max_targets=3,                
+        max_targets=10,                
         opci_threshold=0.01,              
         # Throughput
         window_shape=(1024,1024),                 
         # Debug
         verbose=True,                      
     )
-    print(f"\n[main/arch177_rgb_365cor_lum] - Execution finished -\nRuntime = {(time() - start):.2f}")
+    print(f"\n[main/<data_description>] - Execution finished -\nRuntime = {(time() - start):.2f}")
     
 
 
@@ -66,16 +62,7 @@ def main():
 # Executing Driver
 # ================
 if __name__ == "__main__":    
-    # Memory/Performance profiler
-    
-    cProfile.runctx("main()", globals(), locals(), "Profile.prof")
-
-    s = pstats.Stats("Profile.prof")
-    s.strip_dirs().sort_stats("time").print_stats()
-
-
-    # # Regular execution
-    # main()
+    main()
 
 
 
