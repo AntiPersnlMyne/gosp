@@ -88,7 +88,7 @@ def gosp(
 ) -> None:
     # IO variables
     input_files = _discover_image_files(input_dir, input_image_types)
-    targets_classified_dir = f"{output_dir}"
+    targets_classified_dir = f"{output_dir}/targets_classified"
     
     if not input_files:
         raise FileNotFoundError(
@@ -102,23 +102,14 @@ def gosp(
     # Catch any error, delete temporary files to prevent faulty re-executions
     try:
         logging.info("[GOSP] Running Band Generation Process (BGP)...")
-        if not skip_bgp:
-            band_generation_process(
-                input_image_paths=input_files,
-                output_dir=output_dir,
-                window_shape=window_shape,
-                full_synthetic=full_synthetic,
-                verbose=verbose
-            )
-            generated_bands = _discover_image_files(output_dir, "tif")  # collect output bands
-        else:
-            write_original_multiband(
-                input_image_paths=input_files,
-                output_dir=output_dir,
-                window_shape=window_shape,
-                verbose=verbose
-            )
-            generated_bands = _discover_image_files(output_dir, "tif")
+        band_generation_process(
+            input_image_paths=input_files,
+            output_dir=output_dir,
+            window_shape=window_shape,
+            full_synthetic=full_synthetic,
+            verbose=verbose
+        )
+        generated_bands = _discover_image_files(output_dir, "tif")  # collect output bands
 
 
 
@@ -157,4 +148,5 @@ def gosp(
     # Cleanup temporary file always
     finally:
         remove(f"{output_dir}/gen_band_norm.tif")
+        
 

@@ -233,9 +233,6 @@ def target_classification_process(
                 # Pre-allocate proj_blocks: (K, bands, h, w)
                 proj_blocks = np.empty((k_targets, img_bands, win_h, win_w), dtype=np.float32, order='C')
 
-                # Return identity block early
-                if k_target == 1: proj_blocks[0] = block
-
                 # Project targets onto blocks of data
                 for k in range(k_targets):
                     # One projected band of a block
