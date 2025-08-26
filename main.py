@@ -53,9 +53,9 @@ def main():
         full_synthetic=True,                   
         skip_bgp=False,                 
         max_targets=3,                
-        opci_threshold=0.1,              
+        opci_threshold=0.01,              
         # Throughput
-        window_shape=(256,256),                 
+        window_shape=(1024,1024),                 
         # Debug
         verbose=True,                      
     )

@@ -21,6 +21,7 @@ import logging
 from typing import Tuple, List
 from glob import glob
 from os.path import join
+from os import remove
 import rasterio
 import numpy as np
 
@@ -98,53 +99,62 @@ def gosp(
     else:       logging.basicConfig(level=logging.WARNING)
 
 
+    # Catch any error, delete temporary files to prevent faulty re-executions
+    try:
+        logging.info("[GOSP] Running Band Generation Process (BGP)...")
+        if not skip_bgp:
+            band_generation_process(
+                input_image_paths=input_files,
+                output_dir=output_dir,
+                window_shape=window_shape,
+                full_synthetic=full_synthetic,
+                verbose=verbose
+            )
+            generated_bands = _discover_image_files(output_dir, "tif")  # collect output bands
+        else:
+            write_original_multiband(
+                input_image_paths=input_files,
+                output_dir=output_dir,
+                window_shape=window_shape,
+                verbose=verbose
+            )
+            generated_bands = _discover_image_files(output_dir, "tif")
 
-    logging.info("[GOSP] Running Band Generation Process (BGP)...")
-    if not skip_bgp:
-        band_generation_process(
-            input_image_paths=input_files,
-            output_dir=output_dir,
+
+
+        # Building vrt here prevents race condition in rastio
+        with rasterio.open(generated_bands[0]) as src:
+            vrt = src.read().astype(np.float32)  # shape (bands, rows, cols)
+
+
+
+        logging.info("[GOSP] Running Target Generation Process (TGP)...")
+        targets: np.ndarray = target_generation_process(
+            vrt,
+            window_shape,
+            max_targets,
+            opci_threshold,
+            verbose
+        )
+        logging.info(f"[GOSP] TGP detected {len(targets)} target(s).")
+
+
+
+        logging.info("[GOSP] Running Target Classification Process (TCP)...")
+        target_classification_process(
+            generated_bands=generated_bands,
             window_shape=window_shape,
-            full_synthetic=full_synthetic,
+            targets=targets,
+            output_dir=targets_classified_dir,
             verbose=verbose
         )
-        generated_bands = _discover_image_files(output_dir, "tif")  # collect output bands
-    else:
-        write_original_multiband(
-            input_image_paths=input_files,
-            output_dir=output_dir,
-            window_shape=window_shape,
-            verbose=verbose
-        )
-        generated_bands = _discover_image_files(output_dir, "tif")
-
-
-
-    # Building vrt here prevents race condition in rastio
-    with rasterio.open(generated_bands[0]) as src:
-        vrt = src.read().astype(np.float32)  # shape (bands, rows, cols)
-
-
-
-    logging.info("[GOSP] Running Target Generation Process (TGP)...")
-    targets: np.ndarray = target_generation_process(
-        vrt,
-        window_shape,
-        max_targets,
-        opci_threshold,
-        verbose
-    )
-    logging.info(f"[GOSP] TGP detected {len(targets)} target(s).")
-
-
-
-    logging.info("[GOSP] Running Target Classification Process (TCP)...")
-    target_classification_process(
-        generated_bands=generated_bands,
-        window_shape=window_shape,
-        targets=targets,
-        output_dir=targets_classified_dir,
-        verbose=verbose
-    )
-    logging.info(f"[GOSP] Complete. Results written to: {targets_classified_dir}")
+        logging.info(f"[GOSP] Complete. Results written to: {targets_classified_dir}")
+    
+    # Catch and display any errors
+    except Exception as e:
+        raise Exception(f"[GOSP] -- Error while running GOSP --:\n{e}")    
+    
+    # Cleanup temporary file always
+    finally:
+        remove(f"{output_dir}/gen_band_norm.tif")
 

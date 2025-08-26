@@ -11,6 +11,9 @@ import numpy as np
 cimport numpy as np
 from cython.parallel import prange
 
+from logging import info
+from tqdm import tqdm
+
 from ..build.math_utils import compute_orthogonal_complement_matrix, compute_opci
 
 
@@ -206,11 +209,8 @@ def target_generation_process(
     targets = []
 
     # Main iterative loop: discover up to max_targets
-    if verbose:
-        from tqdm import tqdm
-        outer_prog = tqdm(range(max_targets), desc="[TGP] Iterations", colour="MAGENTA")
-    else:
-        outer_prog = range(max_targets)
+    if verbose:  outer_prog = tqdm(range(max_targets), desc="[TGP] Iterations", colour="MAGENTA", disable= not verbose)
+    else:  outer_prog = range(max_targets)
 
     for k_target in outer_prog:
         # Compute orthogonal complement (GIL must be held)
@@ -269,12 +269,11 @@ def target_generation_process(
         # Compute OPCI for the candidate; compute_opci expects P_perp and candidate vector
         opci_val = compute_opci(P_perp, best_candidate)
 
-        if verbose: print(f"[TGP] Iter {k_target+1}: OPCI={opci_val:.6f}")
+        info(f"[TGP] Iter {k_target+1}: OPCI={opci_val:.6f}")
 
         # Stopping condition
         if opci_val < opci_threshold:
-            if verbose:
-                print(f"[TGP] Stopping: OPCI {opci_val:.6f} < threshold {opci_threshold}")
+            info(f"[TGP] Stopping: OPCI {opci_val:.6f} < threshold {opci_threshold}")
             break
 
         # Accept target: append to list

@@ -23,7 +23,6 @@ pyx_files = [
     "tgp.pyx",
     "tcp.pyx",
     "rastio.pyx",
-    "parallel.pyx",
     "skip_bgp.pyx",
     "math_utils.pyx",
 ]

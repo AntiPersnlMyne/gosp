@@ -125,8 +125,8 @@ def target_classification_process(
     window_shape: Tuple[int, int],
     targets: np.ndarray,  # (K, B) float32
     output_dir: str,
+    verbose:bool,
     scores_filename: str = "targets_classified.tif",
-    verbose: bool = True,
 ) -> None:
     """
     Compute per-target OSP scores across the image without parallel processing.
@@ -157,7 +157,7 @@ def target_classification_process(
     # ==============================
     # Image size & window dimensions
     # ==============================
-    if verbose: info("[TCP] Reading image dimensions ...")
+    info("[TCP] Reading image dimensions ...")
     with MultibandBlockReader(generated_bands) as reader:
         img_height, img_width = reader.get_image_shape()
         img_bands = reader.get_total_bands()
@@ -166,7 +166,7 @@ def target_classification_process(
     # ==============================================
     # Prepare targets and projection matrices
     # ==============================================
-    if verbose: info("[TCP] Preparing targets ...")
+    info("[TCP] Preparing targets ...")
     if targets.ndim != 2:
         raise ValueError("targets must be 2D array of shape (K, B)")
 
@@ -198,7 +198,7 @@ def target_classification_process(
     # ==============================================
     # Generate windows
     # ==============================================
-    if verbose: info("[TCP] Generating windows ...")
+    info("[TCP] Generating windows ...")
     win_mv = _generate_windows(img_height, img_width, win_height, win_width)
     total_windows = win_mv.shape[0]
 
@@ -218,12 +218,12 @@ def target_classification_process(
         output_datatype=np.float32,
     ) as writer:
         with MultibandBlockReader(generated_bands) as reader:
-            for i in tqdm(range(total_windows), desc="[TCP] Classifying pixels", unit="win", colour="YELLOW"):
+            for i in tqdm(range(total_windows), desc="[TCP] Classifying pixels", unit="win", colour="YELLOW", disable=not verbose):
+                # Extract window data
                 row_off = win_mv[i, 0]
                 col_off = win_mv[i, 1]
                 win_h   = win_mv[i, 2]
                 win_w   = win_mv[i, 3]
-
                 # Read block
                 win = np.asarray([row_off, col_off, win_h, win_w], dtype=np.intc)
                 block = reader.read_multiband_block(win)
@@ -231,22 +231,23 @@ def target_classification_process(
                     block = np.ascontiguousarray(block, dtype=np.float32)
 
                 # Pre-allocate proj_blocks: (K, bands, h, w)
-                proj_blocks = np.empty((k_targets, img_bands, win_h, win_w), dtype=np.float32)
+                proj_blocks = np.empty((k_targets, img_bands, win_h, win_w), dtype=np.float32, order='C')
 
-                if k_targets == 1:
-                    proj_blocks[0] = block
-                else:
-                    for k in range(k_targets):
-                        tmp_proj = project_block_onto_subspace(block, Pk_arr[k])
-                        if tmp_proj.dtype != np.float32:
-                            tmp_proj = tmp_proj.astype(np.float32, copy=False)
-                        if not tmp_proj.flags['C_CONTIGUOUS']:
-                            tmp_proj = np.ascontiguousarray(tmp_proj, dtype=np.float32)
-                        proj_blocks[k] = tmp_proj
+                # Return identity block early
+                if k_target == 1: proj_blocks[0] = block
+
+                # Project targets onto blocks of data
+                for k in range(k_targets):
+                    # One projected band of a block
+                    tmp_proj = project_block_onto_subspace(block, Pk_arr[k])
+                    # Ensure float32 and contiguous
+                    if tmp_proj.dtype != np.float32: tmp_proj = tmp_proj.astype(np.float32, copy=False)
+                    if not tmp_proj.flags['C_CONTIGUOUS']: tmp_proj = np.ascontiguousarray(tmp_proj, dtype=np.float32)
+                    # Add projected block to k-th output target 
+                    proj_blocks[k,:,:,:] = tmp_proj
 
                 # prepare output score array (K, h, w)
                 scores = np.empty((k_targets, win_h, win_w), dtype=np.float32)
-
                 # Memoryviews
                 proj_blocks_mv = proj_blocks
                 scores_mv = scores

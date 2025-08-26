@@ -164,7 +164,6 @@ def project_block_onto_subspace(
 
     with nogil:
         _project_block(block_mv, P_mv, out_mv)
-
     return out_f
 
 
