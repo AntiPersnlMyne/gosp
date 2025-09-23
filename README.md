@@ -5,12 +5,12 @@ An implementation of the Generalized Orthoginal Subspace Projection (GOSP) targe
 ## Setup
 (1) Clone the repository to your local machine using a terminal:
 
-git clone https://github.com/AntiPersnlMyne/PalimpsestTxtContrast
+git clone https://github.com/AntiPersnlMyne/RIT_MISHA_GOSP
 
 
 (2) Navigate to the project directory:
 
-cd ~/PATH TO PROJECT/PalimpsestTxtContrast
+cd ~/PATH TO PROJECT/RIT_MISHA_GOSP
 
 
 (3) Run the setup script:
@@ -90,5 +90,6 @@ Roger Easton Jr.(rlepci@rit.edu) | My excellent adviser and project sponsor, MIS
 
 
 David Messinger(dwmpci@rit.edu) | Another adviser and mentor, MISHA personell
+
 
 
